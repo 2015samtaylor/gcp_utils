@@ -2,7 +2,7 @@ import pandas as pd
 import re
 from io import BytesIO
 from google.cloud import storage
-from google.cloud import bigquery
+# from google.cloud import bigquery
 import logging
 
 def append_gcs_file_with_year(dataset_current: str, 

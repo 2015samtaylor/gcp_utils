@@ -1,44 +1,72 @@
 import pytest
 import pandas as pd
 from unittest.mock import patch, MagicMock
-from gcp_utils_sds.yoy import load_and_append_previous_year
+from gcp_utils_sds.yoy import append_gcs_file_with_year, map_bq_to_pandas, cast_df_to_bq_types
 
-def make_blob_with_csv(data):
+def test_map_bq_to_pandas_basic_types():
+    bq_types = {"a": "STRING", "b": "INTEGER", "c": "FLOAT", "d": "BOOLEAN"}
+    pandas_types = map_bq_to_pandas(bq_types)
+    assert pandas_types == {"a": "string", "b": "Int64", "c": "float64", "d": "boolean"}
+
+def test_cast_df_to_bq_types():
+    df = pd.DataFrame({"a": ["1", "2"], "b": [1.1, 2.2]})
+    dtype_map = {"a": "string", "b": "float64"}
+    result = cast_df_to_bq_types(df, dtype_map)
+    assert result["a"].dtype.name == "string"
+    assert result["b"].dtype.name == "float64"
+
+def test_append_gcs_file_with_year_success(monkeypatch):
+    # Prepare current and old data
+    current_df = pd.DataFrame({"id": [1], "val": [10]})
+    old_csv = "id,val\n2,20"
+    # Mock GCS
     mock_blob = MagicMock()
-    mock_blob.download_as_bytes.return_value = data.encode()
-    return mock_blob
-
-def test_load_and_append_previous_year_combines_data():
-    # Prepare fake CSVs
-    current_csv = 'col1,col2\n1,2\n3,4'
-    prev_csv = 'col1,col2\n5,6\n7,8'
-    # Mock bucket and blobs
+    mock_blob.download_as_bytes.return_value = old_csv.encode()
     mock_bucket = MagicMock()
-    mock_bucket.blob.side_effect = [make_blob_with_csv(current_csv), make_blob_with_csv(prev_csv)]
+    mock_bucket.blob.return_value = mock_blob
     mock_client = MagicMock()
     mock_client.bucket.return_value = mock_bucket
-    with patch('gcp_utils_sds.yoy.storage.Client', return_value=mock_client):
-        df = load_and_append_previous_year('bucket', 'etl/incoming/2024_file.csv')
-        assert len(df) == 4
-        assert 'school_year' in df.columns
-        assert set(df['school_year']) == {2023, 2024}
+    # Mock BigQuery schema
+    mock_bq_types = {"id": "INTEGER", "val": "INTEGER", "year": "STRING"}
+    monkeypatch.setattr("gcp_utils_sds.yoy.storage.Client", lambda: mock_client)
+    monkeypatch.setattr("gcp_utils_sds.yoy.get_bq_schema", lambda *a, **kw: mock_bq_types)
+    monkeypatch.setattr("gcp_utils_sds.yoy.map_bq_to_pandas", lambda bq: {"id": "Int64", "val": "Int64", "year": "string"})
+    monkeypatch.setattr("gcp_utils_sds.yoy.cast_df_to_bq_types", lambda df, dtypes: df.astype(dtypes))
+    # Run
+    result = append_gcs_file_with_year(
+        dataset_current="ds",
+        table_name_current="tbl",
+        bucket_name_old="bucket",
+        blob_path_old="star_assessment_results_24-25.csv",
+        current_df=current_df,
+        columns_to_drop_duplicates=["id"]
+    )
+    assert "year" in result.columns
+    assert set(result["id"]) == {1, 2}
+    # Allow for <NA> in the year column for current_df rows
+    year_set = set(result["year"])
+    assert "24-25" in year_set
+    assert len(year_set - {"24-25", pd.NA}) == 0  # Only '24-25' and <NA> allowed
 
-def test_load_and_append_previous_year_handles_missing_prev(caplog):
-    caplog.set_level("INFO")
-    current_csv = 'col1,col2\n1,2\n3,4'
+def test_append_gcs_file_with_year_bad_filename(monkeypatch):
+    current_df = pd.DataFrame({"id": [1], "val": [10]})
+    old_csv = "id,val\n2,20"
+    mock_blob = MagicMock()
+    mock_blob.download_as_bytes.return_value = old_csv.encode()
     mock_bucket = MagicMock()
-    # First call returns current, second raises exception
-    def blob_side_effect(path):
-        if '2024' in path:
-            return make_blob_with_csv(current_csv)
-        else:
-            raise Exception('not found')
-    mock_bucket.blob.side_effect = blob_side_effect
+    mock_bucket.blob.return_value = mock_blob
     mock_client = MagicMock()
     mock_client.bucket.return_value = mock_bucket
-    with patch('gcp_utils_sds.yoy.storage.Client', return_value=mock_client):
-        df = load_and_append_previous_year('bucket', 'etl/incoming/2024_file.csv')
-        assert len(df) == 2
-        assert 'school_year' in df.columns
-        assert set(df['school_year']) == {2024}
-        assert 'Previous year file not found' in caplog.text
+    monkeypatch.setattr("gcp_utils_sds.yoy.storage.Client", lambda: mock_client)
+    monkeypatch.setattr("gcp_utils_sds.yoy.get_bq_schema", lambda *a, **kw: {"id": "INTEGER", "val": "INTEGER"})
+    monkeypatch.setattr("gcp_utils_sds.yoy.map_bq_to_pandas", lambda bq: {"id": "Int64", "val": "Int64"})
+    monkeypatch.setattr("gcp_utils_sds.yoy.cast_df_to_bq_types", lambda df, dtypes: df.astype(dtypes))
+    with pytest.raises(ValueError):
+        append_gcs_file_with_year(
+            dataset_current="ds",
+            table_name_current="tbl",
+            bucket_name_old="bucket",
+            blob_path_old="badfile.csv",
+            current_df=current_df
+        )
+

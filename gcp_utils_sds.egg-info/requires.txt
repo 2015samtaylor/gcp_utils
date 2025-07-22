@@ -3,3 +3,4 @@ google-cloud-secret-manager
 google-auth
 google-auth-oauthlib
 pandas
+google-cloud-bigquery
