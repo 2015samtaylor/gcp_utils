@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 from unittest.mock import patch, MagicMock
-from gcp_utils.yoy import load_and_append_previous_year
+from gcp_utils_sds.yoy import load_and_append_previous_year
 
 def make_blob_with_csv(data):
     mock_blob = MagicMock()
@@ -17,7 +17,7 @@ def test_load_and_append_previous_year_combines_data():
     mock_bucket.blob.side_effect = [make_blob_with_csv(current_csv), make_blob_with_csv(prev_csv)]
     mock_client = MagicMock()
     mock_client.bucket.return_value = mock_bucket
-    with patch('gcp_utils.yoy.storage.Client', return_value=mock_client):
+    with patch('gcp_utils_sds.yoy.storage.Client', return_value=mock_client):
         df = load_and_append_previous_year('bucket', 'etl/incoming/2024_file.csv')
         assert len(df) == 4
         assert 'school_year' in df.columns
@@ -36,7 +36,7 @@ def test_load_and_append_previous_year_handles_missing_prev(caplog):
     mock_bucket.blob.side_effect = blob_side_effect
     mock_client = MagicMock()
     mock_client.bucket.return_value = mock_bucket
-    with patch('gcp_utils.yoy.storage.Client', return_value=mock_client):
+    with patch('gcp_utils_sds.yoy.storage.Client', return_value=mock_client):
         df = load_and_append_previous_year('bucket', 'etl/incoming/2024_file.csv')
         assert len(df) == 2
         assert 'school_year' in df.columns
