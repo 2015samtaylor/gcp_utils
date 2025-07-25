@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import patch, MagicMock
 from gcp_utils_sds.access_secrets import access_secret_version
 
