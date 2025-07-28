@@ -74,8 +74,11 @@ class YearlyDataAppender:
         return df1[list(all_columns)], df2[list(all_columns)]
 
     def _normalize_missing_values(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normalize all null-like values to <NA> and cast columns to nullable types."""
-        df = df.mask(df.isin([None, np.nan, 'nan']))
+        """Normalize null-like values to <NA> and cast to pandas extension dtypes."""
+        # First, replace all known null-like values with pd.NA
+        df = df.replace({None: pd.NA, np.nan: pd.NA, '': pd.NA, 'nan': pd.NA, 'NaN': pd.NA})
+
+        # Now cast to proper nullable types
         for col in df.columns:
             if df[col].dtype.kind in {'O', 'U', 'S'}:
                 df[col] = df[col].astype("string")
@@ -85,7 +88,9 @@ class YearlyDataAppender:
                 df[col] = df[col].astype("Float64")
             elif pd.api.types.is_bool_dtype(df[col]):
                 df[col] = df[col].astype("boolean")
+
         return df
+
 
     def load_and_append(self, table_name: str, blob_paths_old: List[str], current_df: pd.DataFrame, drop_duplicate_columns: list = None) -> pd.DataFrame:
         """
@@ -121,6 +126,8 @@ class YearlyDataAppender:
         current_df = self._cast_df_to_bq_types(current_df, dtype_map)
 
         # Align columns
+        current_df['new_or_current'] = 'current'
+        combined_old_df['new_or_current'] = 'historical'
         current_df, combined_old_df = self._align_columns(current_df, combined_old_df)
 
         # Combine historical and current
